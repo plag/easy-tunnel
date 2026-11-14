@@ -39,6 +39,13 @@ for (let i = 0; i < args.length; i++) {
   }
 }
 let client;
+let stopping = false;
+for (const signal of ['SIGINT', 'SIGTERM']) {
+  process.once(signal, () => {
+    stopping = true;
+    client?.close();
+  });
+}
 try {
   const config = loadConfig();
   port = port ?? config.src;
@@ -60,12 +67,9 @@ try {
   });
   await client.start();
 } catch (err) {
-  console.error(err.message);
   client?.close();
-  process.exitCode = 1;
-}
-for (const signal of ['SIGINT', 'SIGTERM']) {
-  process.once(signal, () => {
-    client?.close();
-  });
+  if (!stopping) {
+    console.error(err.message);
+    process.exitCode = 1;
+  }
 }

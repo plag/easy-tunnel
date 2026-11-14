@@ -259,6 +259,9 @@ export class TunnelClient {
   }
 
   close() {
+    if (this.stopped) {
+      return;
+    }
     this.stopped = true;
     clearInterval(this.heartbeat);
     for (const connection of this.connections) {
@@ -269,7 +272,9 @@ export class TunnelClient {
       }
     }
     this.connections.clear();
-    if (this.control) {
+    if (this.control?.readyState === WebSocket.OPEN) {
+      this.control.close(1000, 'client shutdown');
+    } else if (this.control?.readyState === WebSocket.CONNECTING) {
       this.control.terminate();
     }
   }

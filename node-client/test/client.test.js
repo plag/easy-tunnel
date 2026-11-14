@@ -2,6 +2,10 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
 import { createServer } from 'node:http';
+import { spawn } from 'node:child_process';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
 import net from 'node:net';
 import { WebSocketServer } from 'ws';
 import { TunnelClient } from '../lib/client.js';
@@ -172,5 +176,143 @@ test(
       return client.close();
     });
     await assert.rejects(client.start(), /Incompatible EasyTunnel protocol/);
+  },
+);
+
+test(
+  'client reports normal closure when stopped and abnormal closure on interruption',
+  {
+    timeout: 10000,
+  },
+  async (t) => {
+    const server = createServer();
+    const wss = new WebSocketServer({
+      noServer: true,
+    });
+    const accepted = [];
+    server.on('upgrade', (req, socket, head) => {
+      wss.handleUpgrade(req, socket, head, (ws) => {
+        accepted.push(ws);
+        ws.send(
+          JSON.stringify({
+            type: 'ready',
+            protocolVersion: 1,
+            id: 'a'.repeat(32),
+            secret: 'b'.repeat(32),
+            url: 'https://example.test/',
+          }),
+        );
+      });
+    });
+    server.listen(0, '127.0.0.1');
+    await once(server, 'listening');
+    t.after(() => {
+      for (const ws of wss.clients) {
+        ws.terminate();
+      }
+      wss.close();
+      server.close();
+    });
+
+    const client = new TunnelClient({
+      server: `http://127.0.0.1:${server.address().port}`,
+      token: 'secret',
+      port: 5173,
+      onReady: () => {},
+      onError: () => {},
+    });
+    await client.start();
+    const closed = once(accepted[0], 'close');
+    client.close();
+    const [code] = await closed;
+    assert.equal(code, 1000);
+
+    const interrupted = new TunnelClient({
+      server: `http://127.0.0.1:${server.address().port}`,
+      token: 'secret',
+      port: 5173,
+      onReady: () => {},
+      onError: () => {},
+    });
+    await interrupted.start();
+    const abruptClose = once(accepted[1], 'close');
+    // Simulate transport loss without triggering the client's normal shutdown.
+    interrupted.stopped = true;
+    interrupted.control.terminate();
+    const [abruptCode] = await abruptClose;
+    assert.equal(abruptCode, 1006);
+  },
+);
+
+test(
+  'CLI sends a normal close when it receives SIGINT',
+  {
+    timeout: 10000,
+    skip: process.platform === 'win32',
+  },
+  async (t) => {
+    const server = createServer();
+    const wss = new WebSocketServer({
+      noServer: true,
+    });
+    let control;
+    server.on('upgrade', (req, socket, head) => {
+      wss.handleUpgrade(req, socket, head, (ws) => {
+        control = ws;
+        ws.send(
+          JSON.stringify({
+            type: 'ready',
+            protocolVersion: 1,
+            id: 'a'.repeat(32),
+            secret: 'b'.repeat(32),
+            url: 'https://example.test/',
+          }),
+        );
+      });
+    });
+    server.listen(0, '127.0.0.1');
+    await once(server, 'listening');
+    const cwd = mkdtempSync(join(tmpdir(), 'easytunnel-signal-'));
+    t.after(() => {
+      for (const ws of wss.clients) {
+        ws.terminate();
+      }
+      wss.close();
+      server.close();
+      rmSync(cwd, {
+        recursive: true,
+        force: true,
+      });
+    });
+    const child = spawn(
+      process.execPath,
+      [
+        resolve('node-client/bin/easytunnel.js'),
+        '--server',
+        `http://127.0.0.1:${server.address().port}`,
+        '--src=5173',
+      ],
+      {
+        cwd,
+        env: {
+          ...process.env,
+          TUNNEL_TOKEN: 'secret',
+        },
+        stdio: ['ignore', 'pipe', 'pipe'],
+      },
+    );
+    t.after(() => {
+      if (child.exitCode === null) {
+        child.kill('SIGKILL');
+      }
+    });
+    await once(child.stdout, 'data');
+    const closed = once(control, 'close');
+    const exited = once(child, 'exit');
+    child.kill('SIGINT');
+    const [code] = await closed;
+    const [exitCode] = await exited;
+    assert.equal(code, 1000);
+    assert.equal(exitCode, 0);
   },
 );
