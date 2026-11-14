@@ -1,0 +1,25 @@
+{
+  "name": "easytunnel",
+  "version": "0.1.0",
+  "description": "Node.js client for a self-hosted EasyTunnel server",
+  "type": "module",
+  "bin": {
+    "easytunnel": "./node-client/bin/easytunnel.js"
+  },
+  "files": [
+    "node-client/bin",
+    "node-client/lib",
+    "README.md",
+    "easy-tunnel-config.example.json"
+  ],
+  "engines": {
+    "node": ">=18.17"
+  },
+  "scripts": {
+    "dev": "node ./node-client/bin/easytunnel.js",
+    "test": "node --test node-client/test/*.test.js"
+  },
+  "dependencies": {
+    "ws": "^8.18.3"
+  }
+}

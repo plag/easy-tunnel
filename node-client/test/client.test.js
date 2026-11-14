@@ -1,0 +1,176 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { once } from 'node:events';
+import { createServer } from 'node:http';
+import net from 'node:net';
+import { WebSocketServer } from 'ws';
+import { TunnelClient } from '../lib/client.js';
+
+test(
+  'client proxies a close-delimited response and closes normally',
+  {
+    timeout: 15000,
+  },
+  async (t) => {
+    let requestHeaders = '';
+    const local = net.createServer((socket) => {
+      socket.once('data', (chunk) => {
+        requestHeaders = chunk.toString();
+        socket.end('HTTP/1.0 200 OK\r\n\r\ncomplete');
+      });
+    });
+    local.listen(0, '127.0.0.1');
+    await once(local, 'listening');
+    t.after(() => {
+      return local.close();
+    });
+    const server = createServer();
+    const wss = new WebSocketServer({
+      noServer: true,
+    });
+    t.after(() => {
+      for (const client of wss.clients) {
+        client.terminate();
+      }
+      wss.close();
+      server.close();
+    });
+    let control;
+    let acceptData;
+    const dataReady = new Promise((resolve) => {
+      acceptData = resolve;
+    });
+    server.on('upgrade', (req, socket, head) => {
+      wss.handleUpgrade(req, socket, head, (ws) => {
+        if (req.url === '/_tunnel/control') {
+          assert.equal(req.headers.authorization, 'Bearer secret');
+          assert.equal(req.headers['x-easytunnel-protocol'], '1');
+          control = ws;
+          ws.send(
+            JSON.stringify({
+              type: 'ready',
+              protocolVersion: 1,
+              id: 'a'.repeat(32),
+              secret: 'b'.repeat(32),
+              url: 'https://example.test/',
+            }),
+          );
+        } else {
+          assert.equal(req.headers['x-tunnel-request'], 'c'.repeat(32));
+          acceptData(ws);
+        }
+      });
+    });
+    server.listen(0, '127.0.0.1');
+    await once(server, 'listening');
+    const client = new TunnelClient({
+      server: `http://127.0.0.1:${server.address().port}`,
+      token: 'secret',
+      port: local.address().port,
+      onReady: () => {},
+      onError: () => {},
+    });
+    t.after(() => {
+      return client.close();
+    });
+    await client.start();
+    control.send(
+      JSON.stringify({
+        type: 'open',
+        id: 'c'.repeat(32),
+      }),
+    );
+    const data = await dataReady;
+    const chunks = [];
+    data.on('message', (chunk) => {
+      return chunks.push(chunk);
+    });
+    const closed = once(data, 'close');
+    data.send('GET / HTTP/1.1\r\nHost: abc.tunnel.example.com\r\nConnection: close\r\n\r\n', {
+      binary: true,
+    });
+    const [code] = await closed;
+    assert.equal(code, 1000);
+    assert.equal(Buffer.concat(chunks).toString(), 'HTTP/1.0 200 OK\r\n\r\ncomplete');
+    assert.match(requestHeaders, /Host: localhost:/);
+    assert.match(requestHeaders, /X-Forwarded-Host: abc\.tunnel\.example\.com/);
+  },
+);
+
+test(
+  'client rejects incompatible and missing protocol versions',
+  {
+    timeout: 5000,
+  },
+  async (t) => {
+    const server = createServer();
+    const wss = new WebSocketServer({
+      noServer: true,
+    });
+    t.after(() => {
+      for (const ws of wss.clients) {
+        ws.terminate();
+      }
+      wss.close();
+      server.close();
+    });
+    let version;
+    server.on('upgrade', (req, socket, head) => {
+      wss.handleUpgrade(req, socket, head, (ws) => {
+        ws.send(
+          JSON.stringify({
+            type: 'ready',
+            protocolVersion: version,
+            id: 'a'.repeat(32),
+            secret: 'b'.repeat(32),
+            url: 'https://example.test/',
+          }),
+        );
+      });
+    });
+    server.listen(0, '127.0.0.1');
+    await once(server, 'listening');
+    for (version of [2, undefined]) {
+      const client = new TunnelClient({
+        server: `http://127.0.0.1:${server.address().port}`,
+        token: 'secret',
+        port: 5173,
+        onReady: () => {
+          return assert.fail('incompatible session accepted');
+        },
+        onError: () => {},
+      });
+      await assert.rejects(client.start(), /Incompatible EasyTunnel protocol/);
+      client.close();
+    }
+  },
+);
+
+test(
+  'client reports server rejection of its protocol version',
+  {
+    timeout: 5000,
+  },
+  async (t) => {
+    const server = createServer();
+    server.on('upgrade', (_req, socket) => {
+      socket.end('HTTP/1.1 426 Upgrade Required\r\nContent-Length: 0\r\nConnection: close\r\n\r\n');
+    });
+    server.listen(0, '127.0.0.1');
+    await once(server, 'listening');
+    t.after(() => {
+      return server.close();
+    });
+    const client = new TunnelClient({
+      server: `http://127.0.0.1:${server.address().port}`,
+      token: 'secret',
+      port: 5173,
+      onReady: () => {},
+      onError: () => {},
+    });
+    t.after(() => {
+      return client.close();
+    });
+    await assert.rejects(client.start(), /Incompatible EasyTunnel protocol/);
+  },
+);

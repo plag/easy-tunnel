@@ -1,0 +1,6 @@
+{
+  "server": "https://tunnel.example.com",
+  "src": 5173,
+  "token": "YOUR_TUNNEL_TOKEN",
+  "preserveHost": false
+}
