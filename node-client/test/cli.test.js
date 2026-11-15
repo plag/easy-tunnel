@@ -105,3 +105,32 @@ test('requires an explicit server address', (t) => {
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /Server URL is required/);
 });
+
+test('warns about proxy variables unless --use-proxy is passed', (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), 'easytunnel-proxy-cli-'));
+  t.after(() => {
+    rmSync(cwd, {
+      recursive: true,
+      force: true,
+    });
+  });
+  const env = {
+    ...process.env,
+    HTTPS_PROXY: 'http://user:secret@proxy.example.com:8080',
+    TUNNEL_TOKEN: '',
+  };
+  const options = {
+    cwd,
+    env,
+    encoding: 'utf8',
+    timeout: 5000,
+  };
+  const args = ['--server=https://example.com', '--src=5173'];
+  const direct = spawnSync(process.execPath, [cli, ...args], options);
+  assert.match(direct.stderr, /proxy environment variables are set but ignored/);
+  assert.match(direct.stderr, /--use-proxy/);
+  assert.doesNotMatch(direct.stderr, /secret/);
+  const proxied = spawnSync(process.execPath, [cli, ...args, '--use-proxy'], options);
+  assert.doesNotMatch(proxied.stderr, /proxy environment variables are set but ignored/);
+  assert.match(proxied.stderr, /TUNNEL_TOKEN is required/);
+});

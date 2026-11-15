@@ -20,6 +20,8 @@
     "test": "node --test node-client/test/*.test.js"
   },
   "dependencies": {
+    "https-proxy-agent": "7.0.6",
+    "proxy-from-env": "2.1.0",
     "ws": "^8.18.3"
   }
 }

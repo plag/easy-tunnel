@@ -1,6 +1,7 @@
 import net from 'node:net';
 import WebSocket, { createWebSocketStream } from 'ws';
 import { rewriteRequestHeaders } from './headers.js';
+import { createProxyAgent } from './proxy.js';
 
 const PROTOCOL_VERSION = 1;
 
@@ -43,6 +44,7 @@ export class TunnelClient {
     token,
     port,
     preserveHost = false,
+    useProxy = false,
     onReady = console.log,
     onError = console.error,
   }) {
@@ -69,6 +71,7 @@ export class TunnelClient {
     if (!Number.isInteger(port) || port < 1 || port > 65535) {
       throw new Error('Invalid port');
     }
+    this.agent = useProxy ? createProxyAgent(this.base) : undefined;
     this.token = token;
     this.port = port;
     this.preserveHost = preserveHost;
@@ -76,6 +79,7 @@ export class TunnelClient {
     this.onError = onError;
     this.connections = new Set();
     this.stopped = false;
+
   }
 
   wsURL(path) {
@@ -87,6 +91,7 @@ export class TunnelClient {
   start() {
     return new Promise((resolve, reject) => {
       const ws = (this.control = new WebSocket(this.wsURL('/_tunnel/control'), {
+        agent: this.agent,
         headers: {
           Authorization: `Bearer ${this.token}`,
           'X-Easytunnel-Protocol': String(PROTOCOL_VERSION),
@@ -213,6 +218,7 @@ export class TunnelClient {
     // Attach the listener immediately, including while the data socket connects.
     local.on('error', () => {});
     const ws = new WebSocket(this.wsURL('/_tunnel/data'), {
+      agent: this.agent,
       headers: {
         'X-Tunnel-ID': this.session.id,
         'X-Tunnel-Secret': this.session.secret,
@@ -225,11 +231,14 @@ export class TunnelClient {
     ws.once('close', () => {
       return this.connections.delete(ws);
     });
-    ws.on('error', () => {
-      return local.destroy();
+    ws.on('error', (error) => {
+      if (!this.stopped && this.control?.readyState === WebSocket.OPEN) {
+        this.onError(`Cannot open tunnel data connection: ${error.message}`);
+      }
+      local.destroy();
     });
     ws.once('open', () => {
-      if (this.stopped) {
+      if (this.stopped || local.destroyed || this.control.readyState !== WebSocket.OPEN) {
         ws.terminate();
         local.destroy();
         return;

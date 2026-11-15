@@ -1,15 +1,17 @@
 #!/usr/bin/env node
 import { loadConfig } from '../lib/config.js';
 import { TunnelClient } from '../lib/client.js';
+import { hasProxyEnvironment } from '../lib/proxy.js';
 
 function usage() {
-  console.log('Usage: easytunnel --src=PORT [--server URL] [--preserve-host]');
+  console.log('Usage: easytunnel --src=PORT [--server URL] [--preserve-host] [--use-proxy]');
   console.log('Configure token and optional settings in easy-tunnel-config.json.');
 }
 
 const args = process.argv.slice(2);
 let server;
 let preserveHost;
+let useProxy = false;
 let port;
 for (let i = 0; i < args.length; i++) {
   const arg = args[i];
@@ -25,6 +27,8 @@ for (let i = 0; i < args.length; i++) {
     server = args[++i];
   } else if (arg.startsWith('--server=')) {
     server = arg.slice('--server='.length);
+  } else if (arg === '--use-proxy') {
+    useProxy = true;
   } else if (arg === '--preserve-host') {
     preserveHost = true;
   } else if (arg === '--src' && port === undefined && /^\d+$/.test(args[i + 1] ?? '')) {
@@ -59,8 +63,14 @@ try {
       'Server URL is required; set server in easy-tunnel-config.json or use --server.',
     );
   }
+  if (!useProxy && hasProxyEnvironment()) {
+    console.error(
+      'Warning: proxy environment variables are set but ignored. Use --use-proxy to enable them.',
+    );
+  }
   client = new TunnelClient({
     server: serverURL,
+    useProxy,
     port,
     preserveHost: preserveHost ?? config.preserveHost ?? false,
     token: process.env.TUNNEL_TOKEN ?? config.token,
