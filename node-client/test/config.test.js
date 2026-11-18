@@ -20,6 +20,8 @@ test('loads an optional JSON config and validates settings', (t) => {
     src: 5173,
     token: 'test',
     preserveHost: true,
+    vkServiceToken: 'service',
+    testGroupName: 's',
   };
   writeFileSync(path, JSON.stringify(config));
   assert.deepEqual(loadConfig(cwd), config);
@@ -30,6 +32,10 @@ test('loads an optional JSON config and validates settings', (t) => {
     { src: '5173' },
     { src: 0 },
     { token: 3 },
+    { vkServiceToken: 'service' },
+    { testGroupName: 's' },
+    { vkServiceToken: '   ', testGroupName: 's' },
+    { vkServiceToken: 'service', testGroupName: 42 },
     { preserveHost: 'yes' },
     { server: false },
   ]) {

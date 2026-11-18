@@ -2,6 +2,7 @@
 import { loadConfig } from '../lib/config.js';
 import { TunnelClient } from '../lib/client.js';
 import { hasProxyEnvironment } from '../lib/proxy.js';
+import { updateTestGroupURL } from '../lib/vk.js';
 
 function usage() {
   console.log('Usage: easytunnel --src=PORT [--server URL] [--preserve-host] [--use-proxy]');
@@ -69,6 +70,19 @@ try {
     );
   }
   client = new TunnelClient({
+    async onReady(url, sessionSignal) {
+      console.log(url);
+      if (!config.testGroupName) return;
+      const group = `Тестовая группа «${config.testGroupName}»`;
+      try {
+        const updated = await updateTestGroupURL(config, url, sessionSignal);
+        if (!sessionSignal.aborted) {
+          console.error(updated ? `${group}: URL обновлён — ${url}` : `${group} уже использует ${url}`);
+        }
+      } catch (error) {
+        if (!sessionSignal.aborted) console.error(`${group}: ошибка обновления URL — ${error.message}`);
+      }
+    },
     server: serverURL,
     useProxy,
     port,

@@ -38,5 +38,12 @@ export function loadConfig(directory = process.cwd()) {
   if (config.preserveHost !== undefined && typeof config.preserveHost !== 'boolean') {
     throw new Error('Config preserveHost must be a boolean.');
   }
+  if (config.vkServiceToken !== undefined || config.testGroupName !== undefined) {
+    for (const field of ['vkServiceToken', 'testGroupName']) {
+      if (typeof config[field] !== 'string' || !config[field].trim()) {
+        throw new Error(`Set ${field} to a non-empty string in ${CONFIG_FILE} to update a VK test group.`);
+      }
+    }
+  }
   return config;
 }

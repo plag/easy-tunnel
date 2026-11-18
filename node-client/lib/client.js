@@ -45,7 +45,7 @@ export class TunnelClient {
     port,
     preserveHost = false,
     useProxy = false,
-    onReady = console.log,
+    onReady = (url) => console.log(url),
     onError = console.error,
   }) {
     this.base = new URL(server);
@@ -78,6 +78,7 @@ export class TunnelClient {
     this.onReady = onReady;
     this.onError = onError;
     this.connections = new Set();
+    this.sessionController = new AbortController();
     this.stopped = false;
 
   }
@@ -153,7 +154,7 @@ export class TunnelClient {
           }
           ready = true;
           this.session = msg;
-          this.onReady(msg.url);
+          this.onReady(msg.url, this.sessionController.signal);
           resolve();
           return;
         }
@@ -162,6 +163,7 @@ export class TunnelClient {
         }
       });
       ws.on('close', () => {
+        this.sessionController.abort();
         clearInterval(this.heartbeat);
         for (const connection of this.connections) {
           if (connection instanceof WebSocket) {
@@ -272,6 +274,7 @@ export class TunnelClient {
       return;
     }
     this.stopped = true;
+    this.sessionController.abort();
     clearInterval(this.heartbeat);
     for (const connection of this.connections) {
       if (connection instanceof WebSocket) {
