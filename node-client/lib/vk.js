@@ -44,5 +44,10 @@ export async function updateTestGroupURL({ vkServiceToken, testGroupName }, url,
     webview: url,
   });
   if (response?.group_id !== group.group_id) throw new Error('VK не подтвердил обновление группы');
+  const savedGroups = await call('getTestingGroups', { group_id: String(group.group_id) });
+  const saved = Array.isArray(savedGroups) && savedGroups.find(item => item?.group_id === group.group_id);
+  if (!saved || saved.name !== testGroupName || saved.webview !== url) {
+    throw new Error('после записи VK не вернул ожидаемый URL для этой группы');
+  }
   return true;
 }

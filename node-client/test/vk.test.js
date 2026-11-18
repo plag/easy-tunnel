@@ -17,11 +17,16 @@ function mockVK(t, ...responses) {
 }
 
 test('updates the named group, preserving platforms and omitting users', async (t) => {
-  const calls = mockVK(t, { response: [{ ...group, name: 'S' }, group] }, { response: { group_id: 2 } });
+  const calls = mockVK(t,
+    { response: [{ ...group, name: 'S' }, group] },
+    { response: { group_id: 2 } },
+    { response: [{ ...group, webview: url }] },
+  );
   assert.equal(await updateTestGroupURL(config, url, new AbortController().signal), true);
   assert.deepEqual(calls.map(call => call.endpoint), [
     'https://api.vk.com/method/apps.getTestingGroups',
     'https://api.vk.com/method/apps.updateMetaForTestingGroup',
+    'https://api.vk.com/method/apps.getTestingGroups',
   ]);
   for (const call of calls) {
     assert.equal(call.method, 'POST');
@@ -62,4 +67,13 @@ test('rejects VK errors without logging credentials from the response', async (t
 test('requires confirmation for the same group', async (t) => {
   mockVK(t, { response: [group] }, { response: { group_id: 3 } });
   await assert.rejects(updateTestGroupURL(config, url, new AbortController().signal), /не подтвердил/);
+});
+
+test('rejects an acknowledged write when the group still has the old URL', async (t) => {
+  mockVK(t,
+    { response: [group] },
+    { response: { group_id: 2 } },
+    { response: [{ ...group, webview: 'https://old.example.org' }, { ...group, group_id: 3, webview: url }] },
+  );
+  await assert.rejects(updateTestGroupURL(config, url, new AbortController().signal), /ожидаемый URL/);
 });
